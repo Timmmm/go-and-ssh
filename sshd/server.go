@@ -23,6 +23,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+	"crypto/rsa"
+	"crypto/rand"
 
 	"github.com/kr/pty"
 	"golang.org/x/crypto/ssh"
@@ -50,14 +52,26 @@ func main() {
 	}
 
 	// You can generate a keypair with 'ssh-keygen -t rsa'
+	var private ssh.Signer
 	privateBytes, err := ioutil.ReadFile("id_rsa")
-	if err != nil {
-		log.Fatal("Failed to load private key (./id_rsa)")
+	if err == nil {
+		private, err = ssh.ParsePrivateKey(privateBytes)
+		if err != nil {
+			log.Fatalf("Failed to parse private key (%s)", err)
+		}
+	} else {
+		log.Print("Failed to load private key (./id_rsa).")
 	}
-
-	private, err := ssh.ParsePrivateKey(privateBytes)
-	if err != nil {
-		log.Fatal("Failed to parse private key")
+	if private == nil {
+		log.Print("Generating random key")
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			log.Fatalf("Failed to generate random key (%s)", err)
+		}
+		private, err = ssh.NewSignerFromKey(privateKey)
+		if err != nil {
+			log.Fatalf("Failed to convert random key (%s)", err)
+		}
 	}
 
 	config.AddHostKey(private)
