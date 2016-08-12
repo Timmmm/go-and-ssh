@@ -1,4 +1,4 @@
-// A small SSH daemon providing bash sessions
+// A small SSH daemon providing shell sessions
 //
 // Server:
 // cd my/new/dir/
@@ -41,7 +41,7 @@ func main() {
 		//Define a function to run when a client attempts a password login
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 			// Should use constant-time compare (or better, salt+hash) in a production setting.
-			if c.User() == "foo" && string(pass) == "bar" {
+			if c.User() == "_" && string(pass) == "_" {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("password rejected for %q", c.User())
@@ -52,6 +52,7 @@ func main() {
 	}
 
 	// You can generate a keypair with 'ssh-keygen -t rsa'
+
 	var private ssh.Signer
 	privateBytes, err := ioutil.ReadFile("id_rsa")
 	if err == nil {
@@ -77,13 +78,13 @@ func main() {
 	config.AddHostKey(private)
 
 	// Once a ServerConfig has been configured, connections can be accepted.
-	listener, err := net.Listen("tcp", "0.0.0.0:2200")
+	listener, err := net.Listen("tcp", "0.0.0.0:22")
 	if err != nil {
-		log.Fatalf("Failed to listen on 2200 (%s)", err)
+		log.Fatalf("Failed to listen on 22 (%s)", err)
 	}
 
 	// Accept all connections
-	log.Print("Listening on 2200...")
+	log.Print("Listening on 22...")
 	for {
 		tcpConn, err := listener.Accept()
 		if err != nil {
@@ -131,21 +132,23 @@ func handleChannel(newChannel ssh.NewChannel) {
 	}
 
 	// Fire up bash for this session
-	bash := exec.Command("bash")
+	shell := exec.Command("/bin/sh")
 
 	// Prepare teardown function
 	close := func() {
 		connection.Close()
-		_, err := bash.Process.Wait()
-		if err != nil {
-			log.Printf("Failed to exit bash (%s)", err)
+		if shell.Process != nil {
+			_, err := shell.Process.Wait()
+			if err != nil {
+				log.Printf("Failed to exit bash (%s)", err)
+			}
+			log.Printf("Session closed")
 		}
-		log.Printf("Session closed")
 	}
 
 	// Allocate a terminal for this channel
 	log.Print("Creating pty...")
-	bashf, err := pty.Start(bash)
+	shellf, err := pty.Start(shell)
 	if err != nil {
 		log.Printf("Could not start pty (%s)", err)
 		close()
@@ -155,11 +158,11 @@ func handleChannel(newChannel ssh.NewChannel) {
 	//pipe session to bash and visa-versa
 	var once sync.Once
 	go func() {
-		io.Copy(connection, bashf)
+		io.Copy(connection, shellf)
 		once.Do(close)
 	}()
 	go func() {
-		io.Copy(bashf, connection)
+		io.Copy(shellf, connection)
 		once.Do(close)
 	}()
 
@@ -176,13 +179,13 @@ func handleChannel(newChannel ssh.NewChannel) {
 			case "pty-req":
 				termLen := req.Payload[3]
 				w, h := parseDims(req.Payload[termLen+4:])
-				SetWinsize(bashf.Fd(), w, h)
+				SetWinsize(shellf.Fd(), w, h)
 				// Responding true (OK) here will let the client
 				// know we have a pty ready for input
 				req.Reply(true, nil)
 			case "window-change":
 				w, h := parseDims(req.Payload)
-				SetWinsize(bashf.Fd(), w, h)
+				SetWinsize(shellf.Fd(), w, h)
 			}
 		}
 	}()
